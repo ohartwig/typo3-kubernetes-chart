@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report security issues privately by e-mail to
-**security@ole-hartwig.eu** — not through public issues or merge requests.
+**security@ole-hartwig.eu** — not through public issues or pull requests.
 
 Include what you found, how to reproduce it (values and rendered manifests
 help) and the chart version. You will get an acknowledgement within five

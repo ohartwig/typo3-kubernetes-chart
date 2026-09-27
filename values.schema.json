@@ -193,6 +193,19 @@
       "properties": {
         "existingSecret": { "type": "string" },
         "keys": { "type": "object", "additionalProperties": { "type": "string" } },
+        "extra": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "key"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+              "key": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$" },
+              "property": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
         "externalSecret": {
           "type": "object",
           "properties": {

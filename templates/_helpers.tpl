@@ -307,6 +307,9 @@ secrets from files (the *_FILE variables), never from the environment. */}}
 - { name: VALKEY_TLS_KEY, value: /run/tls/tls.key }
 {{- end }}
 {{- end }}
+{{- range .Values.secrets.extra }}
+- { name: {{ printf "%s_FILE" .name | quote }}, value: {{ printf "/run/secrets/typo3/extra/%s" .key | quote }} }
+{{- end }}
 {{- range $k, $v := .Values.app.env }}
 - { name: {{ $k | quote }}, value: {{ $v | quote }} }
 {{- end }}
@@ -378,6 +381,9 @@ secrets from files (the *_FILE variables), never from the environment. */}}
       - { key: {{ .Values.secrets.keys.encryptionKey }}, path: encryption-key }
       {{- if .Values.valkey.enabled }}
       - { key: {{ .Values.secrets.keys.valkeyPassword }}, path: valkey-password }
+      {{- end }}
+      {{- range .Values.secrets.extra }}
+      - { key: {{ .key }}, path: extra/{{ .key }} }
       {{- end }}
 {{- if .Values.internalTls.enabled }}
 - name: tls

@@ -55,6 +55,9 @@ secrets:
       kind: SecretStore
       name: tenant-a-store
     remoteKey: tenant-a/typo3
+  extra:
+    - name: SMTP_PASSWORD
+      key: smtp-password
 backup:
   enabled: true
   target: s3

@@ -1,5 +1,6 @@
-# The same checks as .gitlab-ci.yml: lint, render, schema validation,
-# secret scan, plus REUSE compliance.
+# Checks for every push to main and every pull request: lint, render,
+# schema validation, secret scan and REUSE compliance. Tool versions are
+# pinned here and kept current by pinup (.pinup.yaml).
 name: ci
 
 on:
@@ -12,10 +13,10 @@ permissions:
 
 env:
   KUBERNETES_VERSION: "1.31.0"
+  # pinup: datasource=github-releases depName=helm/helm
   HELM_VERSION: v4.2.4
   KUBECONFORM_IMAGE: ghcr.io/yannh/kubeconform:v0.7.0-alpine
-  GITLEAKS_VERSION: "8.30.1"
-  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
 
 jobs:
   lint:
@@ -71,14 +72,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: gitleaks
-        # The release binary, checked against the published checksum. Running
-        # the container on a mounted checkout trips git's ownership check.
+        # The checkout belongs to the runner user, the container runs as
+        # another one; mark it safe so git inside the container reads the
+        # history instead of refusing it.
         run: |
-          curl -fsSLo gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
-          tar -xzf gitleaks.tar.gz gitleaks
-          ./gitleaks detect --source . --redact --verbose --no-banner
+          docker run --rm -v "$PWD:/repo" --entrypoint sh "$GITLEAKS_IMAGE" -c \
+            'git config --global --add safe.directory /repo && gitleaks detect --source /repo --redact --verbose --no-banner'
 
   reuse:
     runs-on: ubuntu-latest

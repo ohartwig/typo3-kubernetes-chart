@@ -269,6 +269,7 @@ valkey:
   enabled: true
   image:
     repository: docker.io/valkey/valkey
+    # pinup: datasource=docker depName=docker.io/valkey/valkey
     tag: 8.1.10-alpine
     pullPolicy: IfNotPresent
   port: 6379
@@ -338,6 +339,17 @@ secrets:
       dbPassword: db-password
       encryptionKey: encryption-key
       valkeyPassword: valkey-password
+  # -- Additional secrets for TYPO3 itself, e.g. an SMTP password or an API
+  #   token. Each entry is a key in the Secret (and, with the ExternalSecret,
+  #   a property of the remote secret) that is mounted at
+  #   /run/secrets/typo3/extra/<key>; every TYPO3 container gets
+  #   `<name>_FILE` pointing at that file. A resolver that reads `<NAME>_FILE`
+  #   (for example a `%secret(NAME)%` placeholder in site configuration) picks
+  #   it up without further wiring.
+  #   - name: SMTP_PASSWORD      # environment variable prefix, gets _FILE
+  #     key: smtp-password       # key in the Secret, file name in the pod
+  #     property: smtp-password  # remote property; defaults to key
+  extra: []
 
 # ---------------------------------------------------------------------------
 # Internal TLS (cert-manager)

@@ -1,11 +1,13 @@
 # Contributing
 
-Thank you for considering a contribution. This chart is a reference
+Thank you for considering a contribution. Development happens on GitHub:
+issues and pull requests at
+<https://github.com/ohartwig/typo3-kubernetes-chart>. This chart is a reference
 implementation for a blog series, so the bar is readability first: a change
 that adds a feature should also explain, in a comment or in the README, why
 the feature is there.
 
-## Before you open a merge request
+## Before you open a pull request
 
 - `helm lint --strict .` passes.
 - `helm template` passes for all three profiles in `ci/`, and the output

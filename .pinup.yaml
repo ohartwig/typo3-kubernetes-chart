@@ -1,0 +1,47 @@
+# Dependency updates by pinup (.github/workflows/pinup.yml). pinup reads
+# Renovate-compatible configuration; see https://github.com/ohartwig/pinup.
+#
+# What is pinned here:
+# - GitHub Actions, by commit SHA with the version in a trailing comment;
+# - container images in values.yaml (chart defaults) and in the workflows;
+# - tool versions annotated with `# pinup: datasource=… depName=…`.
+extends:
+  - config:recommended
+enabledManagers:
+  - github-actions
+  - custom.regex
+minimumReleaseAge: 3 days
+customManagers:
+  # `image: registry/name:tag` in values.yaml and `*_IMAGE: registry/name:tag`
+  # in the workflows.
+  - customType: regex
+    managerFilePatterns:
+      - /^values\.yaml$/
+      - /^\.github/workflows/[^/]+\.ya?ml$/
+    matchStrings:
+      - '(?:image|_IMAGE):\s+"?(?<depName>[a-z0-9.-]+\.[a-z]+/[^:\s"@]+):(?<currentValue>[^\s"@]+)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?"?'
+    datasourceTemplate: docker
+    versioningTemplate: docker
+  # A value on the line after a `# pinup: datasource=… depName=…` comment,
+  # for pins a plain image pattern cannot see (a split repository/tag, a
+  # tool version).
+  - customType: regex
+    managerFilePatterns:
+      - /^values\.yaml$/
+      - /^\.github/workflows/[^/]+\.ya?ml$/
+    matchStrings:
+      - '#\s*pinup:\s*datasource=(?<datasource>\S+)\s+depName=(?<depName>\S+)\s*\n\s*[A-Za-z_]+:\s*"?(?<currentValue>[^\s"]+)"?'
+    versioningTemplate: '{{#if (equals datasource "docker")}}docker{{else}}semver{{/if}}'
+packageRules:
+  - matchManagers: [github-actions]
+    groupName: GitHub Actions
+    matchUpdateTypes: [minor, patch, digest]
+    automerge: true
+  # A new default image changes what the chart installs: it needs a chart
+  # patch release (Chart.yaml version and CHANGELOG), so a person merges it.
+  - matchFileNames: [values.yaml]
+    automerge: false
+    prBodyNotes:
+      - "This changes a chart default. Before merging, raise the patch version in `Chart.yaml` and add a `Changed` entry to `CHANGELOG.md`, then tag the release."
+  - matchUpdateTypes: [major]
+    dependencyDashboardApproval: true
