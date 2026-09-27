@@ -112,7 +112,7 @@ versions are also published as a signed OCI artefact.
 
 ```bash
 helm install tenant-a oci://ghcr.io/ohartwig/charts/typo3-kubernetes-chart \
-  --version 0.1.0 --namespace tenant-a \
+  --version 0.1.1 --namespace tenant-a \
   -f my-values.yaml
 ```
 
@@ -120,10 +120,11 @@ helm install tenant-a oci://ghcr.io/ohartwig/charts/typo3-kubernetes-chart \
 
 Every release is signed keylessly by the release workflow of this repository.
 Verify it before you install; no key is needed, the signature is bound to the
-workflow and the tag:
+workflow and the tag. Use cosign 3 or later: the signature is stored in the
+Sigstore bundle format, which cosign 2 does not find.
 
 ```bash
-cosign verify ghcr.io/ohartwig/charts/typo3-kubernetes-chart:0.1.0 \
+cosign verify ghcr.io/ohartwig/charts/typo3-kubernetes-chart:0.1.1 \
   --certificate-identity-regexp '^https://github\.com/ohartwig/typo3-kubernetes-chart/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```

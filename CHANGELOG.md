@@ -6,6 +6,15 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-27
+
+### Fixed
+
+- The verify initContainer now runs cosign 3.0.6 instead of 2.6.1. cosign 3
+  signs in the Sigstore bundle format by default, which cosign 2 cannot find;
+  an artefact signed with a current cosign therefore kept every pod from
+  starting. cosign 3 verifies both formats.
+
 ## [0.1.0] - 2026-09-27
 
 First public release.
@@ -32,5 +41,6 @@ First public release.
 - Threat model (`docs/threat-model.md`), code of conduct, issue and pull
   request templates.
 
-[Unreleased]: https://github.com/ohartwig/typo3-kubernetes-chart/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ohartwig/typo3-kubernetes-chart/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ohartwig/typo3-kubernetes-chart/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ohartwig/typo3-kubernetes-chart/releases/tag/v0.1.0
