@@ -33,10 +33,11 @@ customManagers:
       - '#\s*pinup:\s*datasource=(?<datasource>\S+)\s+depName=(?<depName>\S+)\s*\n\s*[A-Za-z_]+:\s*"?(?<currentValue>[^\s"]+)"?'
     versioningTemplate: '{{#if (equals datasource "docker")}}docker{{else}}semver{{/if}}'
 packageRules:
+  # Grouped into one pull request; the maintainer reviews and merges every
+  # update himself, so nothing is merged automatically.
   - matchManagers: [github-actions]
     groupName: GitHub Actions
     matchUpdateTypes: [minor, patch, digest]
-    automerge: true
   # A new default image changes what the chart installs: it needs a chart
   # patch release (Chart.yaml version and CHANGELOG), so a person merges it.
   - matchFileNames: [values.yaml]
