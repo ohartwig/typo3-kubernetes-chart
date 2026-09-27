@@ -41,7 +41,9 @@ jobs:
           PINUP_GITHUB_TOKEN: ${{ secrets.PINUP_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_COM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          docker run --rm -v "$PWD:/repo" -w /repo \
+          # The image runs as a non-root user; run it as the runner's user so
+          # it may write the plan into the checkout.
+          docker run --rm -v "$PWD:/repo" -w /repo --user "$(id -u):$(id -g)" \
             -e PINUP_GITHUB_TOKEN -e GITHUB_COM_TOKEN \
             -e PINUP_GIT_NAME="Dependency Bot" \
             -e PINUP_GIT_EMAIL="pinup@users.noreply.github.com" \
