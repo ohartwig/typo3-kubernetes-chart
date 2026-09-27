@@ -1,5 +1,6 @@
 # Self-contained pipeline: public images only, pinned tags, no includes.
-# It can be mirrored to any GitLab instance as is.
+# It can be mirrored to any GitLab instance as is. .github/workflows/ci.yml
+# runs the same checks on GitHub.
 
 stages: [lint, render, validate, security]
 

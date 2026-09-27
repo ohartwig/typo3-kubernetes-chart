@@ -7,9 +7,11 @@ application, cache and database, default-deny network policies and secrets that
 never pass through a values file.
 
 It accompanies part 14 of the blog series *"TYPO3 on Kubernetes under
-IT-Grundschutz"*. The articles explain the
-reasoning behind each building block; this chart puts the blocks together so
-you can install, read and adapt them.
+IT-Grundschutz"*
+([English](https://ole-hartwig.eu/en/blog/typo3-kubernetes-it-grundschutz-part-14-reference-chart),
+[German](https://ole-hartwig.eu/blog/typo3-kubernetes-grundschutz-teil-14-referenz-chart)).
+The articles explain the reasoning behind each building block; this chart puts
+the blocks together so you can install, read and adapt them.
 
 It is a **reference**, not a product: small enough to read in an afternoon,
 opinionated where security is concerned, and deliberately silent on everything
@@ -102,6 +104,29 @@ that differs from one platform to the next.
      --set secrets.externalSecret.remoteKey=tenant-a/typo3
    helm test tenant-a --namespace tenant-a
    ```
+
+The commands above install from a checkout of this repository. Released
+versions are also published as a signed OCI artefact.
+
+### Installation from the OCI registry
+
+```bash
+helm install tenant-a oci://ghcr.io/ohartwig/charts/typo3-kubernetes-chart \
+  --version 0.1.0 --namespace tenant-a \
+  -f my-values.yaml
+```
+
+### Verifying the chart signature
+
+Every release is signed keylessly by the release workflow of this repository.
+Verify it before you install; no key is needed, the signature is bound to the
+workflow and the tag:
+
+```bash
+cosign verify ghcr.io/ohartwig/charts/typo3-kubernetes-chart:0.1.0 \
+  --certificate-identity-regexp '^https://github\.com/ohartwig/typo3-kubernetes-chart/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 `ci/values-minimal.yaml`, `ci/values-full.yaml` and `ci/values-ha.yaml` show
 the smallest release, every optional feature, and a high-availability setup.
@@ -291,6 +316,17 @@ object storage as well.
   is signed; the cluster only checks the signature.
 - Any particular cloud provider. Nothing in the chart assumes one.
 
+### Why not an operator?
+
+An operator is custom code that runs with cluster-wide rights and reconciles
+state on its own. That is more attack surface and more software to maintain,
+and its decisions happen at runtime rather than in a reviewed change. A chart
+rendered by a GitOps tool is declarative: every change is a diff that someone
+reviewed, and the cluster holds no logic of its own. An operator starts to pay
+off only with many tenants whose lifecycle (provisioning databases, rotating
+credentials, coordinating upgrades across instances) cannot be expressed
+declaratively. For one TYPO3 installation, or a handful, it cannot.
+
 ## Development
 
 ```bash
@@ -302,7 +338,8 @@ done
 ```
 
 The pipeline in `.gitlab-ci.yml` does the same with public images, and runs
-`gitleaks` on the repository.
+`gitleaks` on the repository. The GitHub Actions in `.github/workflows/` run
+the same checks plus a REUSE lint, and publish releases from `v*` tags.
 
 ## Licence
 
