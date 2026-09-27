@@ -4,8 +4,8 @@
 #
 # Identity: a GitHub App installed on this repository only, with repository
 # permissions Contents, Pull requests, Issues and Workflows (read and write).
-# Its ID and private key are stored as the secrets PINUP_APP_ID and
-# PINUP_APP_KEY; every run mints a short-lived installation token from them.
+# Its client ID is stored as the variable PINUP_APP_CLIENT_ID and its
+# private key as the secret PINUP_APP_KEY; every run mints a short-lived installation token from them.
 # The app, not a person, opens the pull requests, so the maintainer can
 # review and merge them, and they trigger the CI workflow (pull requests
 # opened with the workflow's own GITHUB_TOKEN do not). Without the secrets the
@@ -34,7 +34,7 @@ jobs:
   pinup:
     runs-on: ubuntu-latest
     env:
-      HAS_APP: ${{ secrets.PINUP_APP_ID != '' }}
+      HAS_APP: ${{ vars.PINUP_APP_CLIENT_ID != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,7 +44,7 @@ jobs:
         if: env.HAS_APP == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.PINUP_APP_ID }}
+          client-id: ${{ vars.PINUP_APP_CLIENT_ID }}
           private-key: ${{ secrets.PINUP_APP_KEY }}
       - name: Commit identity
         id: identity
