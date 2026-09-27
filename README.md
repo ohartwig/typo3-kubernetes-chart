@@ -21,7 +21,7 @@ that differs from one platform to the next.
 |---|---|---|
 | TYPO3 | Deployment, Service, Ingress | FrankenPHP serving TYPO3 on HTTP 8080 behind your Ingress controller |
 | Code delivery | initContainers | `cosign verify` of the code artefact, then `oras pull` into an `emptyDir` |
-| Setup | initContainer | `extension:setup` and `cache:warmup` before the first request |
+| Setup | initContainer | `extension:setup` and `cache:warmup` before the first request, one pod at a time |
 | Scheduler | CronJob | `scheduler:run`, `concurrencyPolicy: Forbid` |
 | Valkey | StatefulSet, Service | Cache and session store, TLS with client certificates, password auth |
 | Internal PKI | cert-manager Issuers, Certificates | A CA per release namespace, short-lived leaf certificates |
@@ -179,6 +179,7 @@ The full list with comments is in [`values.yaml`](values.yaml); the schema in
 | `app.replicaCount` | `2` | Replicas without autoscaling. |
 | `app.readOnlyAppCode` | `true` | Mount the code read-only, except for the writable TYPO3 directories. |
 | `app.setup.commands` | `extension:setup`, `cache:warmup` | Run before FrankenPHP starts. |
+| `app.setup.lock.enabled` | `true` | Serialise the setup across pods with a database advisory lock. |
 | `app.health.path` / `app.health.host` | `/`, `ingress.host` | Startup/readiness probe and `helm test`. |
 | `autoscaling.enabled` | `false` | HorizontalPodAutoscaler on CPU (and optionally memory). |
 | `podDisruptionBudget.enabled` | `true` | `maxUnavailable: 1`. |
@@ -237,10 +238,12 @@ The full list with comments is in [`values.yaml`](values.yaml); the schema in
   in-cluster pod IPs: for a database inside the cluster use a
   `namespaceSelector`/`podSelector` peer.
 - **Schema migrations.** `extension:setup` runs in an initContainer of every
-  new pod. The rolling update (`maxSurge: 1`, `maxUnavailable: 0`) starts one
-  new pod at a time, but a fresh install or a scale-up can run it in parallel.
-  It is idempotent; if your extensions ship migrations that are not, run them
-  as a separate step before the rollout.
+  new pod, because it also publishes `public/_assets` into that pod's own code
+  volume; a single hook Job could not do that for every replica. To keep a
+  fresh install or a scale-up from running the schema work in parallel, the
+  setup runs under a database advisory lock (`app.setup.lock`): one pod at a
+  time, the others wait. The lock belongs to the connection, so a pod that
+  dies mid-setup releases it.
 
 ## Files and uploads
 

@@ -353,6 +353,11 @@ secrets from files (the *_FILE variables), never from the environment. */}}
     items:
       - { key: cosign.pub, path: cosign.pub }
 {{- end }}
+{{- if and .Values.app.setup.enabled .Values.app.setup.lock.enabled }}
+- name: setup-lock
+  configMap:
+    name: {{ include "typo3.fullname" . }}-setup-lock
+{{- end }}
 {{- if .Values.code.pullSecret }}
 - name: registry-auth
   secret:

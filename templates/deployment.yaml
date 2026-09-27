@@ -86,7 +86,11 @@ spec:
           securityContext:
             {{- include "typo3.containerSecurityContext" . | nindent 12 }}
           workingDir: /app
+          {{- if .Values.app.setup.lock.enabled }}
+          command: ["php", "/opt/setup-lock/with-db-lock.php", "/bin/sh", "-c"]
+          {{- else }}
           command: ["/bin/sh", "-c"]
+          {{- end }}
           args:
             - |
               set -eu
@@ -96,10 +100,17 @@ spec:
               {{- end }}
           env:
             {{- include "typo3.appEnv" . | nindent 12 }}
+            {{- if .Values.app.setup.lock.enabled }}
+            - { name: SETUP_LOCK_NAME, value: {{ .Values.app.setup.lock.name | default (include "typo3.fullname" .) | quote }} }
+            - { name: SETUP_LOCK_TIMEOUT, value: {{ .Values.app.setup.lock.timeoutSeconds | quote }} }
+            {{- end }}
           volumeMounts:
             - { name: code, mountPath: /app }
             - { name: tmp, mountPath: /tmp }
             {{- include "typo3.appSecretMounts" . | nindent 12 }}
+            {{- if .Values.app.setup.lock.enabled }}
+            - { name: setup-lock, mountPath: /opt/setup-lock, readOnly: true }
+            {{- end }}
           resources:
             {{- toYaml .Values.app.setup.resources | nindent 12 }}
         {{- end }}

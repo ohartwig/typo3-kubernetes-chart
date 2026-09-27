@@ -118,6 +118,17 @@ app:
     commands:
       - vendor/bin/typo3 extension:setup
       - vendor/bin/typo3 cache:warmup
+    lock:
+      # -- Serialise the setup across pods with a database advisory lock
+      #   (GET_LOCK), so pods starting together never run the schema work in
+      #   parallel. Needs pdo_mysql in the image; the lock is released when the
+      #   connection drops, so a crashed pod leaves nothing behind.
+      enabled: true
+      # -- Lock name. Empty means the release's full name; pods of different
+      #   releases sharing one database must use the same name.
+      name: ""
+      # -- Seconds a pod waits for the lock before it fails.
+      timeoutSeconds: 900
     resources:
       requests: { cpu: 100m, memory: 256Mi }
       limits: { memory: 768Mi }

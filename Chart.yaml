@@ -12,7 +12,6 @@ kubeVersion: ">=1.30.0-0"
 home: https://github.com/ohartwig/typo3-kubernetes-chart
 sources:
   - https://github.com/ohartwig/typo3-kubernetes-chart
-icon: https://typo3.org/favicon.ico
 keywords:
   - typo3
   - frankenphp
