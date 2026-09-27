@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ohartwig/typo3-kubernetes-chart/blob/main/SECURITY.md
+    about: Please report security issues privately by e-mail, not as an issue.

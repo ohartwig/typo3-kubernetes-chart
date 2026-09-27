@@ -1,0 +1,42 @@
+name: Bug report
+description: The chart renders or behaves differently from what its documentation says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Please do not include real host names, registry paths, credentials or
+        other details of your environment. Security issues go to SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Chart version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: kubernetes
+    attributes:
+      label: Kubernetes version and distribution
+      placeholder: 1.31, k3s
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The values you used (anonymised) and the command.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant rendered manifests or logs
+      render: text
