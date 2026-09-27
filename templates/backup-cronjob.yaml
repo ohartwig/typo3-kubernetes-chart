@@ -1,0 +1,214 @@
+{{- if .Values.backup.enabled }}
+{{- $b := .Values.backup }}
+{{- $fullname := include "typo3.fullname" . }}
+{{- if eq $b.target "s3" }}
+{{- $_ := required "backup.s3.bucket is required for backup.target=s3" $b.s3.bucket }}
+{{- $_ := required "backup.s3.endpoint is required for backup.target=s3" $b.s3.endpoint }}
+{{- $_ := required "backup.s3.existingSecret is required for backup.target=s3" $b.s3.existingSecret }}
+{{- end }}
+{{- if and (eq $b.target "pvc") (not $b.pvc.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-backup
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "backup") | nindent 4 }}
+  annotations:
+    # Backups outlive the release: `helm uninstall` leaves this claim alone.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ $b.pvc.accessMode }}]
+  {{- with $b.pvc.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $b.pvc.size }}
+---
+{{- end }}
+# Logical dump of the TYPO3 database. The dump is written to an emptyDir
+# first and only stored if it looks complete, so a failed run never replaces
+# a good backup with a truncated one.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $fullname }}-backup
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "backup") | nindent 4 }}
+spec:
+  schedule: {{ $b.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: {{ $b.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "typo3.selectorLabels" (dict "ctx" . "component" "backup") | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            {{- include "typo3.podSecurityContext" (dict "runAsUser" $b.runAsUser "runAsGroup" $b.runAsUser "fsGroup" $b.runAsUser) | nindent 12 }}
+          initContainers:
+            - name: dump
+              image: {{ $b.image | quote }}
+              securityContext:
+                {{- include "typo3.containerSecurityContext" . | nindent 16 }}
+              env:
+                - { name: HOME, value: /tmp }
+                - { name: DB_NAME, value: {{ .Values.database.name | quote }} }
+                - { name: DB_PORT, value: {{ .Values.database.port | quote }} }
+                {{- if .Values.database.host }}
+                - { name: DB_HOST, value: {{ .Values.database.host | quote }} }
+                {{- end }}
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  umask 077
+                  host="${DB_HOST:-$(cat /run/secrets/typo3/db-host)}"
+                  cat > /tmp/client.cnf <<CNF
+                  [client]
+                  host=${host}
+                  port=${DB_PORT}
+                  user="$(cat /run/secrets/typo3/db-user)"
+                  password="$(cat /run/secrets/typo3/db-password)"
+                  {{- if .Values.database.tls.enabled }}
+                  ssl
+                  ssl-ca={{ include "typo3.dbCaPath" . }}
+                  ssl-verify-server-cert={{ if .Values.database.tls.verifyServerCertificate }}1{{ else }}0{{ end }}
+                  {{- if .Values.database.tls.clientCertificate }}
+                  ssl-cert=/run/tls/tls.crt
+                  ssl-key=/run/tls/tls.key
+                  {{- end }}
+                  {{- else }}
+                  skip-ssl
+                  {{- end }}
+                  CNF
+                  file="/work/typo3-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+                  mariadb-dump --defaults-extra-file=/tmp/client.cnf \
+                    --single-transaction --quick --no-tablespaces --skip-lock-tables \
+                    "$DB_NAME" | gzip -c > "$file"
+                  rm -f /tmp/client.cnf
+                  size=$(stat -c %s "$file")
+                  if [ "$size" -lt {{ $b.minBytes | int }} ]; then
+                    echo "dump: ${size} bytes is below the minimum of {{ $b.minBytes | int }}, not storing it" >&2
+                    exit 1
+                  fi
+                  echo "dump: $(basename "$file") ${size} bytes"
+              volumeMounts:
+                - { name: work, mountPath: /work }
+                - { name: tmp, mountPath: /tmp }
+                - { name: secrets, mountPath: /run/secrets/typo3, readOnly: true }
+                {{- if and .Values.database.tls.enabled (or .Values.database.tls.clientCertificate (not .Values.database.tls.caSecret.name)) }}
+                - { name: tls, mountPath: /run/tls, readOnly: true }
+                {{- end }}
+                {{- if and .Values.database.tls.enabled .Values.database.tls.caSecret.name }}
+                - { name: tls-db, mountPath: /run/tls-db, readOnly: true }
+                {{- end }}
+              resources:
+                {{- toYaml $b.resources | nindent 16 }}
+          containers:
+            {{- if eq $b.target "pvc" }}
+            - name: store
+              image: {{ $b.image | quote }}
+              securityContext:
+                {{- include "typo3.containerSecurityContext" . | nindent 16 }}
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  cp /work/typo3-*.sql.gz /backup/
+                  find /backup -maxdepth 1 -name 'typo3-*.sql.gz' -mtime +{{ $b.retentionDays | int }} -print -delete
+                  echo "store: done"
+              volumeMounts:
+                - { name: work, mountPath: /work, readOnly: true }
+                - { name: backup, mountPath: /backup }
+              resources:
+                {{- toYaml $b.resources | nindent 16 }}
+            {{- else }}
+            - name: store
+              image: {{ $b.s3.image | quote }}
+              securityContext:
+                {{- include "typo3.containerSecurityContext" . | nindent 16 }}
+              env:
+                - { name: HOME, value: /tmp }
+                - { name: RCLONE_CONFIG, value: /tmp/rclone.conf }
+                - { name: RCLONE_CONFIG_TARGET_TYPE, value: s3 }
+                - { name: RCLONE_CONFIG_TARGET_PROVIDER, value: Other }
+                - { name: RCLONE_CONFIG_TARGET_ENDPOINT, value: {{ $b.s3.endpoint | quote }} }
+                {{- with $b.s3.region }}
+                - { name: RCLONE_CONFIG_TARGET_REGION, value: {{ . | quote }} }
+                {{- end }}
+                - { name: RCLONE_CONFIG_TARGET_NO_CHECK_BUCKET, value: "true" }
+                - name: RCLONE_CONFIG_TARGET_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef: { name: {{ $b.s3.existingSecret }}, key: {{ $b.s3.accessKeyIdKey }} }
+                - name: RCLONE_CONFIG_TARGET_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: { name: {{ $b.s3.existingSecret }}, key: {{ $b.s3.secretAccessKeyKey }} }
+                - { name: DEST, value: {{ printf "target:%s/%s" $b.s3.bucket (trimSuffix "/" $b.s3.prefix) | quote }} }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  touch "$RCLONE_CONFIG"
+                  for f in /work/typo3-*.sql.gz; do
+                    rclone copyto "$f" "$DEST/$(basename "$f")"
+                  done
+                  rclone delete "$DEST" --include 'typo3-*.sql.gz' --min-age {{ $b.retentionDays | int }}d
+                  echo "store: done"
+              volumeMounts:
+                - { name: work, mountPath: /work, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
+              resources:
+                {{- toYaml $b.resources | nindent 16 }}
+            {{- end }}
+          volumes:
+            - name: work
+              emptyDir: {}
+            - name: tmp
+              emptyDir: { sizeLimit: 64Mi }
+            - name: secrets
+              secret:
+                secretName: {{ include "typo3.secretName" . }}
+                defaultMode: 0440
+                items:
+                  {{- if not .Values.database.host }}
+                  - { key: {{ .Values.secrets.keys.dbHost }}, path: db-host }
+                  {{- end }}
+                  - { key: {{ .Values.secrets.keys.dbUser }}, path: db-user }
+                  - { key: {{ .Values.secrets.keys.dbPassword }}, path: db-password }
+            {{- if and .Values.database.tls.enabled .Values.database.tls.clientCertificate }}
+            - name: tls
+              secret:
+                secretName: {{ $fullname }}-backup-tls
+                defaultMode: 0440
+            {{- else if and .Values.database.tls.enabled (not .Values.database.tls.caSecret.name) }}
+            - name: tls
+              secret:
+                secretName: {{ $fullname }}-app-tls
+                defaultMode: 0440
+                items:
+                  - { key: ca.crt, path: ca.crt }
+            {{- end }}
+            {{- if and .Values.database.tls.enabled .Values.database.tls.caSecret.name }}
+            - name: tls-db
+              secret:
+                secretName: {{ .Values.database.tls.caSecret.name }}
+                defaultMode: 0444
+                items:
+                  - { key: {{ .Values.database.tls.caSecret.key }}, path: ca.crt }
+            {{- end }}
+            {{- if eq $b.target "pvc" }}
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ default (printf "%s-backup" $fullname) $b.pvc.existingClaim }}
+            {{- end }}
+{{- end }}

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "typo3.fullname" . }}
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "typo3.selectorLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP

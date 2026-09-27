@@ -1,0 +1,44 @@
+# `helm test <release>`: one HTTP request to the service, the same path and
+# Host header the readiness probe uses. Passes on any 2xx/3xx answer.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "typo3.fullname" . }}-test-health
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  securityContext:
+    {{- include "typo3.podSecurityContext" (dict "runAsUser" 100 "runAsGroup" 101) | nindent 4 }}
+  containers:
+    - name: curl
+      image: {{ .Values.tests.image | quote }}
+      securityContext:
+        {{- include "typo3.containerSecurityContext" . | nindent 8 }}
+      command: ["curl"]
+      args:
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - "10"
+        - --retry
+        - "5"
+        - --retry-all-errors
+        - --output
+        - /dev/null
+        - --write-out
+        - "%{http_code}\n"
+        {{- with include "typo3.healthHost" . }}
+        - --header
+        - {{ printf "Host: %s" . | quote }}
+        {{- end }}
+        - {{ printf "http://%s:%v%s" (include "typo3.fullname" .) .Values.service.port .Values.app.health.path | quote }}
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { memory: 32Mi }

@@ -1,0 +1,121 @@
+{{- if .Values.internalTls.enabled }}
+{{- $fullname := include "typo3.fullname" . }}
+{{- $ns := .Release.Namespace }}
+{{- $tls := .Values.internalTls }}
+{{- if $tls.issuer.create }}
+# Namespaced CA: a self-signed Issuer only exists to sign the CA certificate;
+# the CA Issuer below signs everything else. Nothing outside this namespace
+# can obtain a certificate from it.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fullname }}-selfsigned
+  labels:
+    {{- include "typo3.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullname }}-ca
+  labels:
+    {{- include "typo3.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: {{ printf "%s internal CA" $fullname | quote }}
+  secretName: {{ $fullname }}-ca
+  duration: {{ $tls.ca.duration }}
+  renewBefore: {{ $tls.ca.renewBefore }}
+  privateKey:
+    algorithm: {{ $tls.privateKey.algorithm }}
+    size: {{ $tls.privateKey.size }}
+    rotationPolicy: Always
+  issuerRef:
+    name: {{ $fullname }}-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fullname }}-ca
+  labels:
+    {{- include "typo3.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ $fullname }}-ca
+---
+{{- end }}
+# Client certificate of the TYPO3 pods (database and Valkey).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullname }}-app-tls
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+spec:
+  secretName: {{ $fullname }}-app-tls
+  commonName: {{ printf "%s-app" $fullname | quote }}
+  duration: {{ $tls.duration }}
+  renewBefore: {{ $tls.renewBefore }}
+  privateKey:
+    algorithm: {{ $tls.privateKey.algorithm }}
+    size: {{ $tls.privateKey.size }}
+    rotationPolicy: Always
+  usages: [digital signature, key encipherment, client auth]
+  issuerRef:
+    {{- include "typo3.issuerRef" . | nindent 4 }}
+{{- if and .Values.valkey.enabled .Values.valkey.tls.enabled }}
+---
+# Server certificate of Valkey. 127.0.0.1 and client auth are there for the
+# probes and the reload sidecar, which talk to Valkey inside the pod.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "typo3.valkeyName" . }}-tls
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "valkey") | nindent 4 }}
+spec:
+  secretName: {{ include "typo3.valkeyName" . }}-tls
+  commonName: {{ include "typo3.valkeyName" . | quote }}
+  dnsNames:
+    - {{ include "typo3.valkeyName" . }}
+    - {{ printf "%s.%s.svc" (include "typo3.valkeyName" .) $ns }}
+    - {{ printf "%s.%s.svc.cluster.local" (include "typo3.valkeyName" .) $ns }}
+  ipAddresses:
+    - 127.0.0.1
+  duration: {{ $tls.duration }}
+  renewBefore: {{ $tls.renewBefore }}
+  privateKey:
+    algorithm: {{ $tls.privateKey.algorithm }}
+    size: {{ $tls.privateKey.size }}
+    rotationPolicy: Always
+  usages: [digital signature, key encipherment, server auth, client auth]
+  issuerRef:
+    {{- include "typo3.issuerRef" . | nindent 4 }}
+{{- end }}
+{{- if and .Values.backup.enabled .Values.database.tls.enabled .Values.database.tls.clientCertificate }}
+---
+# Separate client identity for the backup job, so the database can grant it
+# read-only rights independently of the application.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullname }}-backup-tls
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "backup") | nindent 4 }}
+spec:
+  secretName: {{ $fullname }}-backup-tls
+  commonName: {{ printf "%s-backup" $fullname | quote }}
+  duration: {{ $tls.duration }}
+  renewBefore: {{ $tls.renewBefore }}
+  privateKey:
+    algorithm: {{ $tls.privateKey.algorithm }}
+    size: {{ $tls.privateKey.size }}
+    rotationPolicy: Always
+  usages: [digital signature, key encipherment, client auth]
+  issuerRef:
+    {{- include "typo3.issuerRef" . | nindent 4 }}
+{{- end }}
+{{- end }}

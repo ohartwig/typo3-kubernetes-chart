@@ -1,0 +1,12 @@
+{{- if and .Values.code.verify.enabled .Values.code.verify.publicKey (not .Values.code.verify.existingConfigMap) }}
+# Public key only. Nothing secret lives here, which is why a ConfigMap is enough.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "typo3.cosignConfigMap" . }}
+  labels:
+    {{- include "typo3.labels" . | nindent 4 }}
+data:
+  cosign.pub: |
+    {{- .Values.code.verify.publicKey | trim | nindent 4 }}
+{{- end }}

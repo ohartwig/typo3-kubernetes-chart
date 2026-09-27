@@ -1,0 +1,29 @@
+apiVersion: v2
+name: typo3-kubernetes-chart
+description: >-
+  Reference Helm chart for running TYPO3 on Kubernetes with the hardening
+  expected under IT-Grundschutz: signed code artefacts verified at start-up,
+  read-only containers, mTLS between application, cache and database,
+  default-deny network policies and externally managed secrets.
+type: application
+version: 0.1.0
+appVersion: "14"
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/ohartwig/typo3-kubernetes-chart
+sources:
+  - https://github.com/ohartwig/typo3-kubernetes-chart
+icon: https://typo3.org/favicon.ico
+keywords:
+  - typo3
+  - frankenphp
+  - valkey
+  - cosign
+  - oras
+  - cert-manager
+  - external-secrets
+  - it-grundschutz
+maintainers:
+  - name: Kai Ole Hartwig
+    url: https://github.com/ohartwig
+annotations:
+  artifacthub.io/license: Apache-2.0

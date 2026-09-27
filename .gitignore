@@ -1,0 +1,3 @@
+*.tgz
+/rendered/
+.DS_Store

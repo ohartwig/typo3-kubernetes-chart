@@ -1,0 +1,20 @@
+# The smallest set of values a release needs. Everything else stays default.
+image:
+  repository: registry.example.org/tenant-a/typo3-runtime
+  tag: "8.4-frankenphp"
+code:
+  artifact: registry.example.org/tenant-a/typo3-code@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  verify:
+    # Example key, not a real one. Replace with the output of `cosign public-key`.
+    publicKey: |
+      -----BEGIN PUBLIC KEY-----
+      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+      -----END PUBLIC KEY-----
+ingress:
+  host: typo3.example.org
+secrets:
+  externalSecret:
+    secretStoreRef:
+      name: tenant-a-store
+    remoteKey: tenant-a/typo3

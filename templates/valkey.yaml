@@ -1,0 +1,206 @@
+{{- if .Values.valkey.enabled }}
+{{- $v := .Values.valkey }}
+{{- $name := include "typo3.valkeyName" . }}
+{{- $cli := printf "valkey-cli --no-auth-warning -h 127.0.0.1 -p %v" $v.port }}
+{{- if $v.tls.enabled }}
+{{- $cli = printf "%s --tls --cert /run/tls/tls.crt --key /run/tls/tls.key --cacert /run/tls/ca.crt" $cli }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "valkey") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "typo3.selectorLabels" (dict "ctx" . "component" "valkey") | nindent 4 }}
+  ports:
+    - name: valkey
+      port: {{ $v.port }}
+      targetPort: valkey
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "valkey") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ $name }}
+  selector:
+    matchLabels:
+      {{- include "typo3.selectorLabels" (dict "ctx" . "component" "valkey") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "typo3.selectorLabels" (dict "ctx" . "component" "valkey") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "typo3.podSecurityContext" $v.podSecurityContext | nindent 8 }}
+      {{- with $v.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        # Renders the configuration into an emptyDir, so the password never
+        # appears in the pod spec or on the command line.
+        - name: render-config
+          image: "{{ $v.image.repository }}:{{ $v.image.tag }}"
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          securityContext:
+            {{- include "typo3.containerSecurityContext" . | nindent 12 }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              {
+                echo "bind * -::*"
+                {{- if $v.tls.enabled }}
+                echo "port 0"
+                echo "tls-port {{ $v.port }}"
+                echo "tls-cert-file /run/tls/tls.crt"
+                echo "tls-key-file /run/tls/tls.key"
+                echo "tls-ca-cert-file /run/tls/ca.crt"
+                echo "tls-auth-clients yes"
+                echo "tls-protocols TLSv1.3"
+                {{- else }}
+                echo "port {{ $v.port }}"
+                {{- end }}
+                echo "dir /data"
+                echo "maxmemory {{ $v.maxmemory }}"
+                echo "maxmemory-policy {{ $v.maxmemoryPolicy }}"
+                {{- if $v.persistence.enabled }}
+                echo "appendonly yes"
+                {{- else }}
+                echo "appendonly no"
+                echo 'save ""'
+                {{- end }}
+                printf 'requirepass "%s"\n' "$(cat /run/secrets/valkey/password)"
+              } > /etc/valkey/valkey.conf
+          volumeMounts:
+            - { name: config, mountPath: /etc/valkey }
+            - { name: secrets, mountPath: /run/secrets/valkey, readOnly: true }
+          resources:
+            requests: { cpu: 5m, memory: 8Mi }
+            limits: { memory: 32Mi }
+      containers:
+        - name: valkey
+          image: "{{ $v.image.repository }}:{{ $v.image.tag }}"
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          securityContext:
+            {{- include "typo3.containerSecurityContext" . | nindent 12 }}
+          command: ["valkey-server", "/etc/valkey/valkey.conf"]
+          ports:
+            - name: valkey
+              containerPort: {{ $v.port }}
+              protocol: TCP
+          startupProbe:
+            tcpSocket: { port: valkey }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - REDISCLI_AUTH="$(cat /run/secrets/valkey/password)" {{ $cli }} ping | grep -q PONG
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket: { port: valkey }
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - { name: config, mountPath: /etc/valkey, readOnly: true }
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+            - { name: secrets, mountPath: /run/secrets/valkey, readOnly: true }
+            {{- if $v.tls.enabled }}
+            - { name: tls, mountPath: /run/tls, readOnly: true }
+            {{- end }}
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+        {{- if and $v.tls.enabled $v.certReloader.enabled }}
+        # cert-manager renews the certificate in the Secret; Valkey only reads
+        # it at start. Re-setting the tls-* options makes it load the new files.
+        - name: cert-reloader
+          image: "{{ $v.image.repository }}:{{ $v.image.tag }}"
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          securityContext:
+            {{- include "typo3.containerSecurityContext" . | nindent 12 }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              prev="$(md5sum /run/tls/tls.crt | cut -d' ' -f1)"
+              while true; do
+                sleep {{ $v.certReloader.intervalSeconds }}
+                cur="$(md5sum /run/tls/tls.crt 2>/dev/null | cut -d' ' -f1)"
+                [ -n "$cur" ] && [ "$cur" != "$prev" ] || continue
+                if REDISCLI_AUTH="$(cat /run/secrets/valkey/password)" {{ $cli }} \
+                     CONFIG SET tls-cert-file /run/tls/tls.crt tls-key-file /run/tls/tls.key tls-ca-cert-file /run/tls/ca.crt \
+                     | grep -q '^OK$'; then
+                  echo "cert-reloader: certificate reloaded"
+                  prev="$cur"
+                else
+                  echo "cert-reloader: reload failed, retrying" >&2
+                fi
+              done
+          volumeMounts:
+            - { name: secrets, mountPath: /run/secrets/valkey, readOnly: true }
+            - { name: tls, mountPath: /run/tls, readOnly: true }
+          resources:
+            {{- toYaml $v.certReloader.resources | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: config
+          emptyDir: { medium: Memory, sizeLimit: 1Mi }
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+        {{- if not $v.persistence.enabled }}
+        - name: data
+          emptyDir: { sizeLimit: 1Gi }
+        {{- end }}
+        - name: secrets
+          secret:
+            secretName: {{ include "typo3.secretName" . }}
+            defaultMode: 0440
+            items:
+              - { key: {{ .Values.secrets.keys.valkeyPassword }}, path: password }
+        {{- if $v.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ $name }}-tls
+            defaultMode: 0440
+        {{- end }}
+  {{- if $v.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "typo3.selectorLabels" (dict "ctx" . "component" "valkey") | nindent 10 }}
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with $v.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $v.persistence.size }}
+  {{- end }}
+{{- end }}
