@@ -6,7 +6,7 @@ description: >-
   read-only containers, mTLS between application, cache and database,
   default-deny network policies and externally managed secrets.
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "14"
 kubeVersion: ">=1.30.0-0"
 home: https://github.com/ohartwig/typo3-kubernetes-chart

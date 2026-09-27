@@ -74,7 +74,10 @@ code:
     # -- Verify the cosign signature of the artefact before it is pulled.
     #   Fail-closed: a missing or invalid signature keeps the pod from starting.
     enabled: true
-    image: ghcr.io/sigstore/cosign/cosign:v2.6.1
+    # -- cosign 3 verifies both signature formats: the Sigstore bundle that
+    #   cosign 3 writes by default and the older `.sig` tag of cosign 2.
+    #   cosign 2 only finds the latter and reports "no signatures found".
+    image: ghcr.io/sigstore/cosign/cosign:v3.0.6
     # -- PEM-encoded cosign public key. Rendered into a ConfigMap.
     publicKey: ""
     # -- Alternatively, an existing ConfigMap with the key under `cosign.pub`.
