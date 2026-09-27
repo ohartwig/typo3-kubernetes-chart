@@ -6,8 +6,9 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first public release will be cut as 0.1.0 when the repository is
-published; until then everything below is unreleased.
+## [0.1.0] - 2026-09-27
+
+First public release.
 
 ### Added
 
@@ -30,3 +31,6 @@ published; until then everything below is unreleased.
   keylessly with cosign.
 - Threat model (`docs/threat-model.md`), code of conduct, issue and pull
   request templates.
+
+[Unreleased]: https://github.com/ohartwig/typo3-kubernetes-chart/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ohartwig/typo3-kubernetes-chart/releases/tag/v0.1.0
