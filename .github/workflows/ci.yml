@@ -14,7 +14,7 @@ permissions:
 env:
   KUBERNETES_VERSION: "1.31.0"
   # pinup: datasource=github-releases depName=helm/helm
-  HELM_VERSION: v4.2.4
+  HELM_VERSION: v4.3.0
   KUBECONFORM_IMAGE: ghcr.io/yannh/kubeconform:v0.7.0-alpine
   GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
 
