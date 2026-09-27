@@ -112,7 +112,7 @@ versions are also published as a signed OCI artefact.
 
 ```bash
 helm install tenant-a oci://ghcr.io/ohartwig/charts/typo3-kubernetes-chart \
-  --version 0.1.1 --namespace tenant-a \
+  --version 0.2.0 --namespace tenant-a \
   -f my-values.yaml
 ```
 
@@ -124,7 +124,7 @@ workflow and the tag. Use cosign 3 or later: the signature is stored in the
 Sigstore bundle format, which cosign 2 does not find.
 
 ```bash
-cosign verify ghcr.io/ohartwig/charts/typo3-kubernetes-chart:0.1.1 \
+cosign verify ghcr.io/ohartwig/charts/typo3-kubernetes-chart:0.2.0 \
   --certificate-identity-regexp '^https://github\.com/ohartwig/typo3-kubernetes-chart/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -188,6 +188,34 @@ $GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey'] = $read('TYPO3_ENCRYPTION_KE
 Wiring Valkey into the caching framework and the session backend depends on
 the cache backend you use; the variables above carry everything it needs.
 
+### Additional secrets and `%secret()%` placeholders
+
+Every secret reaches the pod as a file, and a `<NAME>_FILE` variable names
+the path. A resolver that reads `<NAME>_FILE` — for example a `%secret(NAME)%`
+placeholder in site configuration or other YAML — therefore works without
+further wiring:
+
+- the built-in values resolve as `%secret(TYPO3_DB_PASSWORD)%`,
+  `%secret(TYPO3_ENCRYPTION_KEY)%`, `%secret(VALKEY_PASSWORD)%` and so on,
+  through the `*_FILE` variables in the table above;
+- anything else TYPO3 needs — an SMTP password, an API token — goes into
+  `secrets.extra`. Each entry becomes a key in the Secret (and a property of
+  the remote secret, when the ExternalSecret is used), is mounted at
+  `/run/secrets/typo3/extra/<key>`, and sets `<name>_FILE` in every TYPO3
+  container:
+
+  ```yaml
+  secrets:
+    extra:
+      - name: SMTP_PASSWORD      # -> SMTP_PASSWORD_FILE, %secret(SMTP_PASSWORD)%
+        key: smtp-password       # key in the Secret, file name in the pod
+        property: smtp-password  # remote property; defaults to key
+  ```
+
+The chart mounts its secrets under `/run/secrets/typo3/`, not directly under
+`/run/secrets/`. A resolver that only looks for `/run/secrets/<name>` does
+not find them; use the `<NAME>_FILE` variables.
+
 ## Important values
 
 The full list with comments is in [`values.yaml`](values.yaml); the schema in
@@ -217,6 +245,7 @@ The full list with comments is in [`values.yaml`](values.yaml); the schema in
 | `valkey.persistence.enabled` | `false` | Keep the Valkey dataset on a PVC. |
 | `secrets.existingSecret` | `""` | Use your own Secret instead of an ExternalSecret. |
 | `secrets.externalSecret.secretStoreRef.name` / `remoteKey` | — | Where ESO reads the credentials. |
+| `secrets.extra` | `[]` | Additional secrets as files, each with a `<NAME>_FILE` variable. |
 | `internalTls.enabled` | `true` | Namespaced CA and certificates via cert-manager. |
 | `internalTls.issuer.create` | `true` | `false` plus `issuer.existing` to use a shared issuer. |
 | `scheduler.enabled` / `scheduler.schedule` | `true` / `*/5 * * * *` | TYPO3 scheduler CronJob. |
@@ -338,9 +367,11 @@ for p in minimal full ha; do
 done
 ```
 
-The pipeline in `.gitlab-ci.yml` does the same with public images, and runs
-`gitleaks` on the repository. The GitHub Actions in `.github/workflows/` run
-the same checks plus a REUSE lint, and publish releases from `v*` tags.
+The GitHub Actions in `.github/workflows/` run the same checks on every pull
+request, plus `gitleaks` and a REUSE lint, and publish releases from `v*`
+tags. [pinup](https://github.com/ohartwig/pinup) keeps the pinned actions,
+tools and default images current (`.pinup.yaml`); a pull request that changes
+a default image also needs a chart patch release.
 
 ## Licence
 

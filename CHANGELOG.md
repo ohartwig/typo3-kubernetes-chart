@@ -6,6 +6,23 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-27
+
+### Added
+
+- `secrets.extra`: additional secrets for TYPO3, mounted as files under
+  `/run/secrets/typo3/extra/` with a `<NAME>_FILE` variable in every TYPO3
+  container, so resolvers that read `<NAME>_FILE` (for example `%secret()%`
+  placeholders) work without further wiring. Fetched through the
+  ExternalSecret like the built-in keys.
+- Dependency updates by pinup (`.pinup.yaml`, `.github/workflows/pinup.yml`)
+  for the pinned actions, tools and default images.
+
+### Changed
+
+- GitHub is the only home of the chart; the GitLab pipeline is gone.
+- gitleaks runs from its container image, pinned like every other tool.
+
 ## [0.1.1] - 2026-09-27
 
 ### Fixed
@@ -41,6 +58,7 @@ First public release.
 - Threat model (`docs/threat-model.md`), code of conduct, issue and pull
   request templates.
 
-[Unreleased]: https://github.com/ohartwig/typo3-kubernetes-chart/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ohartwig/typo3-kubernetes-chart/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ohartwig/typo3-kubernetes-chart/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ohartwig/typo3-kubernetes-chart/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ohartwig/typo3-kubernetes-chart/releases/tag/v0.1.0
