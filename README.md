@@ -202,6 +202,9 @@ The full list with comments is in [`values.yaml`](values.yaml); the schema in
 
 ## Security notes
 
+The threat model behind these notes, including the residual risks, is in
+[docs/threat-model.md](docs/threat-model.md).
+
 - **Supply chain.** The code runs only after `cosign verify` succeeded against
   your public key. Reference the artefact by digest: cosign verifies the digest
   the tag resolves to, and a tag could move between the verify and the pull
