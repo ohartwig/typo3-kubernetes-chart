@@ -1,0 +1,462 @@
+# Default values for typo3-kubernetes-chart.
+#
+# The minimum a release needs is:
+#   image.repository + image.tag       the FrankenPHP/PHP runtime image
+#   code.artifact                       the signed OCI artefact with the TYPO3 code
+#   code.verify.publicKey               the cosign public key that signed it
+#   ingress.host                        the public host name
+#   secrets.externalSecret.*            where the credentials come from
+#                                       (or secrets.existingSecret)
+#
+# Everything else has a default that is safe to run with. Optional features are
+# switched on and off here; nothing is enabled behind your back.
+
+# -- Override the short name used in labels (app.kubernetes.io/name).
+nameOverride: ""
+# -- Override the full resource name prefix. Defaults to "<release>-typo3",
+# or just "<release>" when the release name already contains "typo3".
+fullnameOverride: ""
+# -- Extra labels added to every object the chart renders.
+commonLabels: {}
+
+# ---------------------------------------------------------------------------
+# Runtime image
+# ---------------------------------------------------------------------------
+# The image provides PHP, FrankenPHP and the PHP extensions TYPO3 needs. It
+# does NOT contain the application code: that is delivered separately as a
+# signed OCI artefact (see `code`), so a runtime patch and a code release are
+# two independent, independently verifiable events.
+#
+# Contract the image has to fulfil (see README, "Runtime image contract"):
+#   - serves plain HTTP on `app.port` (FrankenPHP honours SERVER_NAME=":8080")
+#   - runs as a non-root user and tolerates a read-only root filesystem
+#     (writes only to /tmp and to the mounted /app/var, /app/public/typo3temp)
+#   - has /bin/sh, so the setup initContainer can run its commands
+image:
+  # -- Runtime image repository, e.g. registry.example.org/tenant-a/typo3-runtime. Required.
+  repository: ""
+  # -- Runtime image tag. Required unless `image.digest` is set.
+  tag: ""
+  # -- Optional digest (sha256:...). Takes precedence over the tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# -- Pull secrets for the runtime image (list of names).
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------
+# Application code: OCI artefact, verified with cosign, pulled with oras
+# ---------------------------------------------------------------------------
+code:
+  # -- Reference of the code artefact. Required. Prefer a digest
+  #   (registry.example.org/tenant-a/typo3-code@sha256:...) over a tag: the
+  #   digest is what cosign verified, a tag can move between the verify and
+  #   the pull initContainer.
+  artifact: ""
+  # -- Name of the tarball inside the artefact. Pushed in CI with e.g.
+  #   `oras push <ref> app.tar.gz:application/vnd.oci.image.layer.v1.tar+gzip`.
+  file: app.tar.gz
+  # -- Name of a kubernetes.io/dockerconfigjson Secret used by oras and cosign
+  #   to read the artefact. Leave empty for an anonymously readable registry.
+  pullSecret: ""
+  # -- Size limit of the emptyDir that holds the unpacked code.
+  sizeLimit: 2Gi
+
+  oras:
+    image: ghcr.io/oras-project/oras:v1.3.4
+    # -- Pull attempts before the initContainer gives up (linear back-off).
+    retries: 5
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+
+  verify:
+    # -- Verify the cosign signature of the artefact before it is pulled.
+    #   Fail-closed: a missing or invalid signature keeps the pod from starting.
+    enabled: true
+    image: ghcr.io/sigstore/cosign/cosign:v2.6.1
+    # -- PEM-encoded cosign public key. Rendered into a ConfigMap.
+    publicKey: ""
+    # -- Alternatively, an existing ConfigMap with the key under `cosign.pub`.
+    existingConfigMap: ""
+    # A KMS reference instead of a file also works with cosign
+    # (e.g. awskms:///alias/release-signing), but then the pod needs cloud
+    # credentials. A public key file needs none, which is why it is the default.
+    # -- Skip the transparency log lookup. Only for private signing setups
+    #   without Rekor; the signature itself is still verified.
+    ignoreTlog: false
+    attestation:
+      # -- Additionally verify an attestation attached to the artefact
+      #   (e.g. the SBOM that the CI CVE gate evaluated).
+      enabled: false
+      # -- Predicate type passed to `cosign verify-attestation --type`.
+      type: spdxjson
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 256Mi }
+
+# ---------------------------------------------------------------------------
+# TYPO3 application (Deployment)
+# ---------------------------------------------------------------------------
+app:
+  # -- Replicas when autoscaling is off. Two, spread across nodes/zones, so a
+  #   node drain never takes the site down.
+  replicaCount: 2
+  # -- HTTP port FrankenPHP listens on inside the pod.
+  port: 8080
+  # -- TYPO3_CONTEXT.
+  typo3Context: Production
+  # -- Mount the unpacked code read-only in the app container. Only var/,
+  #   public/typo3temp/ and public/_assets/ stay writable.
+  readOnlyAppCode: true
+
+  setup:
+    # -- Run the setup commands in an initContainer before FrankenPHP starts.
+    enabled: true
+    # -- Shell commands, run in /app one after another; the first failure
+    #   stops the pod (fail loud rather than serve a half-migrated schema).
+    commands:
+      - vendor/bin/typo3 extension:setup
+      - vendor/bin/typo3 cache:warmup
+    lock:
+      # -- Serialise the setup across pods with a database advisory lock
+      #   (GET_LOCK), so pods starting together never run the schema work in
+      #   parallel. Needs pdo_mysql in the image; the lock is released when the
+      #   connection drops, so a crashed pod leaves nothing behind.
+      enabled: true
+      # -- Lock name. Empty means the release's full name; pods of different
+      #   releases sharing one database must use the same name.
+      name: ""
+      # -- Seconds a pod waits for the lock before it fails.
+      timeoutSeconds: 900
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { memory: 768Mi }
+
+  # -- Additional plain environment variables (name: value).
+  env: {}
+  # -- Additional env entries in Kubernetes syntax (valueFrom etc.).
+  extraEnv: []
+
+  health:
+    # -- Path used by the startup/readiness probes and the helm test.
+    path: /
+    # -- Host header sent with the probes. Defaults to `ingress.host`, because
+    #   TYPO3 resolves the site by host name.
+    host: ""
+
+  probes:
+    startup:
+      periodSeconds: 5
+      timeoutSeconds: 5
+      # -- 5 s x 60 = up to five minutes for the first worker boot.
+      failureThreshold: 60
+    readiness:
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    liveness:
+      # The liveness probe is a TCP check on purpose: a database outage makes
+      # the HTTP probe fail on every replica at once, and restarting all pods
+      # would not bring the database back.
+      periodSeconds: 20
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+  resources:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { memory: 1Gi }
+
+  # -- Pod-level security context. runAsNonRoot and the seccomp profile are
+  #   always set by the chart; these are the IDs your runtime image uses.
+  podSecurityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  terminationGracePeriodSeconds: 30
+
+  topologySpread:
+    # -- Spread replicas across zones and nodes (soft constraint: a
+    #   single-zone or single-node cluster still schedules).
+    enabled: true
+    maxSkew: 1
+    whenUnsatisfiable: ScheduleAnyway
+    topologyKeys:
+      - topology.kubernetes.io/zone
+      - kubernetes.io/hostname
+
+autoscaling:
+  # -- Create a HorizontalPodAutoscaler for the app Deployment.
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  # -- Optional memory target; leave empty to scale on CPU only.
+  targetMemoryUtilizationPercentage: null
+
+podDisruptionBudget:
+  # -- PodDisruptionBudget for the app. maxUnavailable 1 is safe with any
+  #   replica count, including one (a drain is never blocked forever).
+  enabled: true
+  maxUnavailable: 1
+
+serviceAccount:
+  create: true
+  # -- Name to use; defaults to the full name.
+  name: ""
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  # -- IngressClass to use; empty uses the cluster default.
+  className: ""
+  # -- Public host name, e.g. typo3.example.org. Required when the Ingress is enabled.
+  host: ""
+  # -- Additional host names served by the same release.
+  extraHosts: []
+  annotations: {}
+  # Example for cert-manager-issued public certificates:
+  #   cert-manager.io/cluster-issuer: letsencrypt
+  tls:
+    enabled: true
+    # -- Secret holding the public certificate. Defaults to "<fullname>-ingress-tls".
+    secretName: ""
+
+# ---------------------------------------------------------------------------
+# Database (external MariaDB/MySQL)
+# ---------------------------------------------------------------------------
+# The chart does not run a database. Host and credentials come from the
+# secret (keys `db-host`, `db-user`, `db-password`, see `secrets`); the values
+# below are the non-secret part.
+database:
+  # -- Optional literal host name. When empty (the default), the host is read
+  #   from the `db-host` key of the secret.
+  host: ""
+  port: 3306
+  name: typo3
+  tls:
+    # -- Connect to the database over TLS.
+    enabled: true
+    # -- Present a client certificate from the chart's internal CA (mutual TLS).
+    #   The database server has to trust that CA (see README, "Database TLS").
+    clientCertificate: true
+    # -- Verify the server certificate against the CA below.
+    verifyServerCertificate: true
+    # -- Secret with the CA that signed the database server certificate. When
+    #   the name is empty, the chart's internal CA is used.
+    caSecret:
+      name: ""
+      key: ca.crt
+
+# ---------------------------------------------------------------------------
+# Valkey (cache and sessions)
+# ---------------------------------------------------------------------------
+valkey:
+  enabled: true
+  image:
+    repository: docker.io/valkey/valkey
+    tag: 8.1.10-alpine
+    pullPolicy: IfNotPresent
+  port: 6379
+  tls:
+    # -- Serve TLS only and require client certificates from the internal CA.
+    #   Needs `internalTls.enabled`.
+    enabled: true
+  # -- Memory ceiling and eviction policy. Cache and session data are
+  #   rebuildable, so eviction is preferable to an OOM kill.
+  maxmemory: 256mb
+  maxmemoryPolicy: allkeys-lru
+  persistence:
+    # -- Keep the dataset on a PersistentVolume. Off by default: losing the
+    #   cache on restart costs a warm-up, losing sessions logs editors out.
+    enabled: false
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }
+  podSecurityContext:
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+  certReloader:
+    # -- Sidecar that tells Valkey to reload its certificate after cert-manager
+    #   rotated it. Without it the pod keeps serving the old certificate.
+    enabled: true
+    intervalSeconds: 60
+    resources:
+      requests: { cpu: 5m, memory: 8Mi }
+      limits: { memory: 32Mi }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+# One Secret carries everything the application needs. Either an
+# ExternalSecret (External Secrets Operator) creates it, or you point
+# `existingSecret` at one you manage yourself. The chart never renders secret
+# values into a manifest.
+secrets:
+  # -- Use this existing Secret instead of creating one through an ExternalSecret.
+  existingSecret: ""
+  # -- Key names inside the Secret.
+  keys:
+    dbHost: db-host
+    dbUser: db-user
+    dbPassword: db-password
+    encryptionKey: encryption-key
+    valkeyPassword: valkey-password
+  externalSecret:
+    enabled: true
+    refreshInterval: 1h
+    secretStoreRef:
+      kind: ClusterSecretStore
+      # -- Name of the (Cluster)SecretStore. Required when enabled.
+      name: ""
+    # -- Key of the remote secret, e.g. "tenant-a/typo3". Required when enabled.
+    remoteKey: ""
+    # -- Property names inside the remote secret, mapped to the keys above.
+    properties:
+      dbHost: db-host
+      dbUser: db-user
+      dbPassword: db-password
+      encryptionKey: encryption-key
+      valkeyPassword: valkey-password
+
+# ---------------------------------------------------------------------------
+# Internal TLS (cert-manager)
+# ---------------------------------------------------------------------------
+# A CA per release namespace: a self-signed Issuer bootstraps a CA
+# certificate, a CA Issuer signs the short-lived certificates for the app
+# (client), Valkey (server) and the backup job (client).
+internalTls:
+  enabled: true
+  issuer:
+    # -- Create the self-signed bootstrap Issuer, the CA Certificate and the CA Issuer.
+    create: true
+    # -- Use an existing issuer instead (e.g. one shared with the database).
+    existing:
+      name: ""
+      kind: Issuer
+      group: cert-manager.io
+  ca:
+    duration: 87600h
+    renewBefore: 720h
+  # -- Lifetime of the leaf certificates.
+  duration: 720h
+  renewBefore: 240h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  # -- Add `reloader.stakater.com/auto: "true"` to the app pods, so a rotated
+  #   client certificate triggers a rolling restart. Needs Stakater Reloader.
+  reloaderAnnotations: false
+
+# ---------------------------------------------------------------------------
+# TYPO3 scheduler (CronJob)
+# ---------------------------------------------------------------------------
+scheduler:
+  enabled: true
+  schedule: "*/5 * * * *"
+  # -- Command run in /app. concurrencyPolicy is always Forbid.
+  command: ["vendor/bin/typo3", "scheduler:run"]
+  startingDeadlineSeconds: 120
+  activeDeadlineSeconds: 900
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+
+# ---------------------------------------------------------------------------
+# Database backup (CronJob)
+# ---------------------------------------------------------------------------
+backup:
+  enabled: false
+  schedule: "17 2 * * *"
+  # -- Where the dump goes: "pvc" or "s3" (any S3-compatible storage).
+  target: pvc
+  retentionDays: 14
+  # -- A dump smaller than this is treated as a failure and not stored.
+  minBytes: 1024
+  activeDeadlineSeconds: 3600
+  image: docker.io/library/mariadb:11.8.9
+  # -- UID the backup containers run as (the mysql user of the image).
+  runAsUser: 999
+  pvc:
+    # -- Use an existing claim instead of creating one.
+    existingClaim: ""
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  s3:
+    image: docker.io/rclone/rclone:1.75.1
+    # -- Endpoint URL of the S3-compatible service, e.g. https://s3.example.org.
+    endpoint: ""
+    region: ""
+    bucket: ""
+    prefix: typo3/
+    # -- Secret with the access key pair.
+    existingSecret: ""
+    accessKeyIdKey: access-key-id
+    secretAccessKeyKey: secret-access-key
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# ---------------------------------------------------------------------------
+# NetworkPolicies
+# ---------------------------------------------------------------------------
+# Default deny for ingress and egress, then one explicit allow per flow.
+# Use one namespace per tenant: the default deny applies to the namespace.
+networkPolicy:
+  enabled: true
+  # -- Apply the default deny to every pod in the namespace (podSelector {}).
+  #   Set to false if the namespace is shared and the deny should only cover
+  #   this release.
+  namespaceDefaultDeny: true
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+  ingressController:
+    # -- Where the ingress controller pods run. Adjust to your controller.
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ingress-nginx
+    podSelector: {}
+  database:
+    # -- NetworkPolicy peers for the database. Empty allows the database port
+    #   to any address; narrow it, e.g. `- ipBlock: { cidr: 192.0.2.10/32 }`.
+    to: []
+  registry:
+    # -- Peers for the OCI registry (oras/cosign in the init containers).
+    #   Empty allows the port to any address.
+    to: []
+    port: 443
+  objectStorage:
+    # -- Peers for the backup's S3 endpoint. Empty allows the port to any address.
+    to: []
+    port: 443
+  # -- Additional egress rules for the app and scheduler pods, in
+  #   NetworkPolicy syntax (SMTP relay, fileadmin object storage, APIs).
+  extraAppEgress: []
+
+tests:
+  image: docker.io/curlimages/curl:8.22.0

@@ -1,0 +1,92 @@
+# Every optional feature switched on, to render and validate all templates.
+image:
+  repository: registry.example.org/tenant-a/typo3-runtime
+  digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+imagePullSecrets: [registry-pull]
+commonLabels:
+  example.org/cost-centre: web
+code:
+  artifact: registry.example.org/tenant-a/typo3-code:1.4.2
+  pullSecret: registry-pull
+  verify:
+    existingConfigMap: release-signing-key
+    ignoreTlog: true
+    attestation:
+      enabled: true
+      type: spdxjson
+app:
+  env:
+    TYPO3_TRUSTED_HOSTS_PATTERN: "typo3\\.example\\.org|www\\.typo3\\.example\\.org"
+  extraEnv:
+    - name: POD_NAME
+      valueFrom:
+        fieldRef: { fieldPath: metadata.name }
+  podAnnotations:
+    example.org/scrape: "false"
+  priorityClassName: web-standard
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetMemoryUtilizationPercentage: 80
+ingress:
+  className: nginx
+  host: typo3.example.org
+  extraHosts: [www.typo3.example.org]
+  annotations:
+    cert-manager.io/cluster-issuer: public-acme
+database:
+  host: mariadb.databases.svc
+  name: tenant_a
+  tls:
+    caSecret:
+      name: database-ca
+      key: ca.crt
+valkey:
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: standard
+internalTls:
+  reloaderAnnotations: true
+secrets:
+  externalSecret:
+    secretStoreRef:
+      kind: SecretStore
+      name: tenant-a-store
+    remoteKey: tenant-a/typo3
+backup:
+  enabled: true
+  target: s3
+  s3:
+    endpoint: https://s3.example.org
+    region: example-1
+    bucket: tenant-a-backups
+    existingSecret: backup-s3-credentials
+networkPolicy:
+  ingressController:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ingress-system
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: ingress-nginx
+  database:
+    to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: databases
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: mariadb
+  registry:
+    to:
+      - ipBlock: { cidr: 192.0.2.0/24 }
+  objectStorage:
+    to:
+      - ipBlock: { cidr: 198.51.100.0/24 }
+  extraAppEgress:
+    - to:
+        - ipBlock: { cidr: 203.0.113.25/32 }
+      ports:
+        - { protocol: TCP, port: 587 }

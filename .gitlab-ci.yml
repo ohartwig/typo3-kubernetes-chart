@@ -1,0 +1,82 @@
+# Self-contained pipeline: public images only, pinned tags, no includes.
+# It can be mirrored to any GitLab instance as is. .github/workflows/ci.yml
+# runs the same checks on GitHub.
+
+stages: [lint, render, validate, security]
+
+variables:
+  KUBERNETES_VERSION: "1.31.0"
+  HELM_IMAGE: docker.io/alpine/helm:4.2.4
+  KUBECONFORM_IMAGE: ghcr.io/yannh/kubeconform:v0.7.0-alpine
+  GITLEAKS_IMAGE: docker.io/zricethezav/gitleaks:v8.30.1
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+.profiles:
+  parallel:
+    matrix:
+      - PROFILE: [minimal, full, ha]
+
+helm:lint:
+  stage: lint
+  image:
+    name: $HELM_IMAGE
+    entrypoint: [""]
+  script:
+    # Defaults alone: required values are reported as warnings, not errors.
+    - helm lint --strict . --kube-version "$KUBERNETES_VERSION"
+    - |
+      for profile in minimal full ha; do
+        helm lint --strict . --kube-version "$KUBERNETES_VERSION" -f "ci/values-${profile}.yaml"
+      done
+
+helm:template:
+  stage: render
+  extends: .profiles
+  image:
+    name: $HELM_IMAGE
+    entrypoint: [""]
+  script:
+    - mkdir -p rendered
+    - >
+      helm template example . --namespace tenant-a
+      --kube-version "$KUBERNETES_VERSION"
+      -f "ci/values-${PROFILE}.yaml"
+      > "rendered/${PROFILE}.yaml"
+    - grep '^kind:' "rendered/${PROFILE}.yaml" | sort | uniq -c
+  artifacts:
+    paths: [rendered/]
+    expire_in: 1 week
+
+kubeconform:
+  stage: validate
+  extends: .profiles
+  needs: ["helm:template"]
+  image:
+    name: $KUBECONFORM_IMAGE
+    entrypoint: [""]
+  script:
+    # Core schemas plus the community CRD catalogue (cert-manager, ESO).
+    - >
+      /kubeconform -strict -ignore-missing-schemas -summary
+      -kubernetes-version "$KUBERNETES_VERSION"
+      -schema-location default
+      -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+      "rendered/${PROFILE}.yaml"
+
+gitleaks:
+  stage: security
+  needs: []
+  image:
+    name: $GITLEAKS_IMAGE
+    entrypoint: [""]
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - gitleaks detect --source . --redact --verbose --no-banner

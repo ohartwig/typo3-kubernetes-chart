@@ -1,0 +1,37 @@
+# High availability: more replicas, hard spread across zones, PVC backups,
+# an issuer shared with the database operator instead of a per-release CA.
+image:
+  repository: registry.example.org/tenant-a/typo3-runtime
+  tag: "8.4-frankenphp"
+code:
+  artifact: registry.example.org/tenant-a/typo3-code@sha256:2222222222222222222222222222222222222222222222222222222222222222
+  verify:
+    existingConfigMap: release-signing-key
+ingress:
+  className: nginx
+  host: typo3.example.org
+app:
+  replicaCount: 3
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { memory: 1536Mi }
+  topologySpread:
+    whenUnsatisfiable: DoNotSchedule
+    topologyKeys:
+      - topology.kubernetes.io/zone
+podDisruptionBudget:
+  maxUnavailable: 1
+internalTls:
+  issuer:
+    create: false
+    existing:
+      name: tenant-a-internal-ca
+      kind: Issuer
+secrets:
+  existingSecret: typo3-credentials
+backup:
+  enabled: true
+  target: pvc
+  retentionDays: 30
+  pvc:
+    size: 20Gi

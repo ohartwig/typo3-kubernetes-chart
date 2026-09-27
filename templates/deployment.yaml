@@ -1,0 +1,163 @@
+{{- include "typo3.validate" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "typo3.fullname" . }}
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.app.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  # Never remove a serving pod before its successor is ready.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "typo3.selectorLabels" (dict "ctx" . "component" "app") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "typo3.selectorLabels" (dict "ctx" . "component" "app") | nindent 8 }}
+        {{- with .Values.app.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # A new artefact reference is a new release of the code: roll the pods.
+        checksum/code-artifact: {{ include "typo3.artifact" . | sha256sum | trunc 16 | quote }}
+        {{- if .Values.internalTls.reloaderAnnotations }}
+        reloader.stakater.com/auto: "true"
+        {{- end }}
+        {{- with .Values.app.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "typo3.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.app.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.app.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- include "typo3.podSecurityContext" .Values.app.podSecurityContext | nindent 8 }}
+      {{- if .Values.app.topologySpread.enabled }}
+      topologySpreadConstraints:
+        {{- range .Values.app.topologySpread.topologyKeys }}
+        - maxSkew: {{ $.Values.app.topologySpread.maxSkew }}
+          topologyKey: {{ . }}
+          whenUnsatisfiable: {{ $.Values.app.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "typo3.selectorLabels" (dict "ctx" $ "component" "app") | nindent 14 }}
+          matchLabelKeys:
+            - pod-template-hash
+        {{- end }}
+      {{- end }}
+      {{- with .Values.app.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{- include "typo3.codeInitContainers" . | trim | nindent 8 }}
+        {{- if .Values.app.setup.enabled }}
+        # Runs against the database before the first request is served.
+        - name: typo3-setup
+          image: {{ include "typo3.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "typo3.containerSecurityContext" . | nindent 12 }}
+          workingDir: /app
+          {{- if .Values.app.setup.lock.enabled }}
+          command: ["php", "/opt/setup-lock/with-db-lock.php", "/bin/sh", "-c"]
+          {{- else }}
+          command: ["/bin/sh", "-c"]
+          {{- end }}
+          args:
+            - |
+              set -eu
+              {{- range .Values.app.setup.commands }}
+              echo "typo3-setup: {{ . }}"
+              {{ . }}
+              {{- end }}
+          env:
+            {{- include "typo3.appEnv" . | nindent 12 }}
+            {{- if .Values.app.setup.lock.enabled }}
+            - { name: SETUP_LOCK_NAME, value: {{ .Values.app.setup.lock.name | default (include "typo3.fullname" .) | quote }} }
+            - { name: SETUP_LOCK_TIMEOUT, value: {{ .Values.app.setup.lock.timeoutSeconds | quote }} }
+            {{- end }}
+          volumeMounts:
+            - { name: code, mountPath: /app }
+            - { name: tmp, mountPath: /tmp }
+            {{- include "typo3.appSecretMounts" . | nindent 12 }}
+            {{- if .Values.app.setup.lock.enabled }}
+            - { name: setup-lock, mountPath: /opt/setup-lock, readOnly: true }
+            {{- end }}
+          resources:
+            {{- toYaml .Values.app.setup.resources | nindent 12 }}
+        {{- end }}
+      containers:
+        - name: typo3
+          image: {{ include "typo3.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "typo3.containerSecurityContext" . | nindent 12 }}
+          workingDir: /app
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.port }}
+              protocol: TCP
+          env:
+            {{- include "typo3.appEnv" . | nindent 12 }}
+          volumeMounts:
+            {{- include "typo3.appRuntimeMounts" . | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.app.health.path }}
+              port: http
+              {{- with include "typo3.healthHost" . }}
+              httpHeaders:
+                - { name: Host, value: {{ . | quote }} }
+              {{- end }}
+            periodSeconds: {{ .Values.app.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.probes.startup.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.app.health.path }}
+              port: http
+              {{- with include "typo3.healthHost" . }}
+              httpHeaders:
+                - { name: Host, value: {{ . | quote }} }
+              {{- end }}
+            periodSeconds: {{ .Values.app.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.probes.readiness.failureThreshold }}
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: {{ .Values.app.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.probes.liveness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+      volumes:
+        {{- include "typo3.appVolumes" . | nindent 8 }}

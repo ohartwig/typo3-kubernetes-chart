@@ -1,0 +1,38 @@
+TYPO3 release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+{{- if .Values.ingress.enabled }}
+
+Site:     http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/
+Backend:  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/typo3/
+{{- end }}
+
+Watch the start-up (verify -> fetch -> setup -> serve):
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }} -w
+
+Test the release:
+  helm test -n {{ .Release.Namespace }} {{ .Release.Name }}
+
+{{- if not (contains "@sha256:" .Values.code.artifact) }}
+
+WARNING: code.artifact is referenced by tag. The signature is checked for the
+digest the tag points to at verify time; pin a digest (…@sha256:…) so the
+artefact that is pulled is guaranteed to be the one that was verified.
+{{- end }}
+{{- if not .Values.code.verify.enabled }}
+
+WARNING: code.verify.enabled=false. Unsigned or tampered code artefacts will be
+started without complaint.
+{{- end }}
+{{- if not .Values.networkPolicy.enabled }}
+
+WARNING: networkPolicy.enabled=false. Pods can reach and be reached by anything
+in the cluster.
+{{- end }}
+{{- if and .Values.database.tls.enabled .Values.database.tls.clientCertificate .Values.internalTls.issuer.create }}
+
+The database must trust this release's internal CA for client certificates:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "typo3.fullname" . }}-ca -o jsonpath='{.data.ca\.crt}' | base64 -d
+{{- end }}
+
+Not handled by this chart: fileadmin and other uploads. The pods are stateless;
+configure a TYPO3 file storage on S3-compatible object storage (see README).

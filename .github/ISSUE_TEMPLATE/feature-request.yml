@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a change to the chart.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        This chart is a reference implementation, kept small on purpose. A
+        feature is more likely to be accepted if it is generic, optional and
+        secure by default.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does it solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: Does it widen permissions, network flows or secret handling?

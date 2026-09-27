@@ -1,0 +1,70 @@
+{{- if and .Values.app.setup.enabled .Values.app.setup.lock.enabled }}
+{{- /*
+One setup at a time per database.
+
+The setup runs as an initContainer, so it runs once per pod. That is where it
+has to run: extension:setup also publishes public/_assets into the pod's own
+code volume, which a single hook Job could not do for every replica. But two
+pods starting together (fresh install, scale-up, node loss) would otherwise run
+the schema work against the same database at the same time.
+
+The wrapper opens one connection, takes a named advisory lock (GET_LOCK), runs
+the setup, releases. A pod that dies mid-setup drops its connection and the
+lock with it; there is nothing to clean up. Waiting pods log how long they
+waited.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "typo3.fullname" . }}-setup-lock
+  labels:
+    {{- include "typo3.labels" . | nindent 4 }}
+data:
+  with-db-lock.php: |
+    <?php
+    // Usage: php with-db-lock.php <command> [args...]
+    // Holds a MariaDB/MySQL advisory lock while <command> runs, then exits
+    // with the command's exit code. Reads the same TYPO3_DB_* variables as
+    // the application.
+    function env_or_file(string $name, string $default = ''): string {
+        $v = getenv($name);
+        if ($v !== false && $v !== '') { return $v; }
+        $f = getenv($name . '_FILE');
+        if ($f !== false && is_readable($f)) { return trim((string) file_get_contents($f)); }
+        return $default;
+    }
+    // PHP 8.4 moved the driver constants to Pdo\Mysql; 8.5 deprecates the old ones.
+    function mysql_attr(string $name): int {
+        return defined("Pdo\\Mysql::ATTR_$name") ? constant("Pdo\\Mysql::ATTR_$name") : constant("PDO::MYSQL_ATTR_$name");
+    }
+    $cmd = array_slice($argv, 1);
+    if ($cmd === []) { fwrite(STDERR, "with-db-lock: no command given\n"); exit(2); }
+    $host = env_or_file('TYPO3_DB_HOST');
+    $port = env_or_file('TYPO3_DB_PORT', '3306');
+    $user = env_or_file('TYPO3_DB_USER');
+    $pass = env_or_file('TYPO3_DB_PASSWORD');
+    $name = getenv('SETUP_LOCK_NAME') ?: 'typo3-setup';
+    $wait = (int) (getenv('SETUP_LOCK_TIMEOUT') ?: 900);
+    $opt = [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 5];
+    foreach (['TYPO3_DB_SSL_CA' => 'SSL_CA', 'TYPO3_DB_SSL_CERT' => 'SSL_CERT', 'TYPO3_DB_SSL_KEY' => 'SSL_KEY'] as $env => $attr) {
+        if (getenv($env)) { $opt[mysql_attr($attr)] = getenv($env); }
+    }
+    if (getenv('TYPO3_DB_SSL_CA')) {
+        $opt[mysql_attr('SSL_VERIFY_SERVER_CERT')] = filter_var(getenv('TYPO3_DB_SSL_VERIFY_SERVER_CERT') ?: 'true', FILTER_VALIDATE_BOOL);
+    }
+    $pdo = null; $err = '';
+    for ($i = 0; $i < 60 && $pdo === null; $i++) {
+        try { $pdo = new PDO("mysql:host=$host;port=$port", $user, $pass, $opt); }
+        catch (Throwable $e) { $err = $e->getMessage(); sleep(2); }
+    }
+    if ($pdo === null) { fwrite(STDERR, "with-db-lock: database unreachable after 120s: $err\n"); exit(1); }
+    $t0 = microtime(true);
+    $got = $pdo->query('SELECT GET_LOCK(' . $pdo->quote($name) . ", $wait)")->fetchColumn();
+    if ((string) $got !== '1') { fwrite(STDERR, "with-db-lock: lock '$name' not acquired within {$wait}s\n"); exit(1); }
+    printf("with-db-lock: lock '%s' acquired after %.1fs\n", $name, microtime(true) - $t0);
+    $rc = 1;
+    passthru(implode(' ', array_map('escapeshellarg', $cmd)), $rc);
+    $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($name) . ')');
+    printf("with-db-lock: lock '%s' released, command exit %d\n", $name, $rc);
+    exit($rc);
+{{- end }}

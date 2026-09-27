@@ -1,0 +1,170 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $fullname := include "typo3.fullname" . }}
+# Default deny for ingress and egress. Every flow the release needs is allowed
+# explicitly below, per component.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-default-deny
+  labels:
+    {{- include "typo3.labels" . | nindent 4 }}
+spec:
+  {{- if $np.namespaceDefaultDeny }}
+  podSelector: {}
+  {{- else }}
+  podSelector:
+    matchLabels:
+      {{- include "typo3.releaseSelector" . | nindent 6 }}
+  {{- end }}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-allow-dns
+  labels:
+    {{- include "typo3.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "typo3.releaseSelector" . | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            {{- toYaml $np.dns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml $np.dns.podSelector | nindent 12 }}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# TYPO3 web pods: HTTP in from the ingress controller (and the helm test pod);
+# out to Valkey, the database and the registry holding the code artefact.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-app
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "typo3.selectorLabels" (dict "ctx" . "component" "app") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            {{- toYaml $np.ingressController.namespaceSelector | nindent 12 }}
+          {{- with $np.ingressController.podSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        - podSelector:
+            matchLabels:
+              {{- include "typo3.selectorLabels" (dict "ctx" . "component" "test") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.app.port }} }
+  egress:
+    {{- include "typo3.appEgress" . | trim | nindent 4 }}
+{{- if .Values.scheduler.enabled }}
+---
+# Scheduler pods: the same outbound flows as the web pods, nothing inbound.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-scheduler
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "scheduler") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "typo3.selectorLabels" (dict "ctx" . "component" "scheduler") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- include "typo3.appEgress" . | trim | nindent 4 }}
+{{- end }}
+{{- if .Values.valkey.enabled }}
+---
+# Valkey: reachable from the TYPO3 pods only, no outbound traffic at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-valkey
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "valkey") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "typo3.selectorLabels" (dict "ctx" . "component" "valkey") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "typo3.selectorLabels" (dict "ctx" . "component" "app") | nindent 14 }}
+        {{- if .Values.scheduler.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "typo3.selectorLabels" (dict "ctx" . "component" "scheduler") | nindent 14 }}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.valkey.port }} }
+  egress: []
+{{- end }}
+{{- if .Values.backup.enabled }}
+---
+# Backup job: out to the database and, for the S3 target, the object storage.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-backup
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "backup") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "typo3.selectorLabels" (dict "ctx" . "component" "backup") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        {{- if $np.database.to }}
+        {{- toYaml $np.database.to | nindent 8 }}
+        {{- else }}
+        {{- include "typo3.anyPeers" . | nindent 8 }}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.database.port }} }
+    {{- if eq .Values.backup.target "s3" }}
+    - to:
+        {{- if $np.objectStorage.to }}
+        {{- toYaml $np.objectStorage.to | nindent 8 }}
+        {{- else }}
+        {{- include "typo3.anyPeers" . | nindent 8 }}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: {{ $np.objectStorage.port }} }
+    {{- end }}
+{{- end }}
+---
+# helm test pod: may only reach the TYPO3 service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-test
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "typo3.selectorLabels" (dict "ctx" . "component" "test") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "typo3.selectorLabels" (dict "ctx" . "component" "app") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.app.port }} }
+{{- end }}

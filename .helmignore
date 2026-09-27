@@ -1,0 +1,16 @@
+# Not part of the packaged chart.
+.git/
+.gitignore
+.gitlab-ci.yml
+.gitleaks.toml
+ci/
+LICENSES/
+REUSE.toml
+CONTRIBUTING.md
+SECURITY.md
+*.tgz
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/

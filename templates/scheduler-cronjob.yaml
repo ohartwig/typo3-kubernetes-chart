@@ -1,0 +1,68 @@
+{{- if .Values.scheduler.enabled }}
+{{- $s := .Values.scheduler }}
+# The TYPO3 scheduler as a CronJob. Forbid is not negotiable: two overlapping
+# scheduler runs execute the same tasks twice.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "typo3.fullname" . }}-scheduler
+  labels:
+    {{- include "typo3.componentLabels" (dict "ctx" . "component" "scheduler") | nindent 4 }}
+spec:
+  schedule: {{ $s.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ $s.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ $s.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $s.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ $s.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            {{- include "typo3.selectorLabels" (dict "ctx" . "component" "scheduler") | nindent 12 }}
+          annotations:
+            checksum/code-artifact: {{ include "typo3.artifact" . | sha256sum | trunc 16 | quote }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "typo3.serviceAccountName" . }}
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- range . }}
+            - name: {{ . }}
+            {{- end }}
+          {{- end }}
+          securityContext:
+            {{- include "typo3.podSecurityContext" .Values.app.podSecurityContext | nindent 12 }}
+          {{- with .Values.app.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.app.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          initContainers:
+            {{- include "typo3.codeInitContainers" . | trim | nindent 12 }}
+          containers:
+            - name: scheduler
+              image: {{ include "typo3.image" . | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext:
+                {{- include "typo3.containerSecurityContext" . | nindent 16 }}
+              workingDir: /app
+              command:
+                {{- toYaml $s.command | nindent 16 }}
+              env:
+                {{- include "typo3.appEnv" . | nindent 16 }}
+              volumeMounts:
+                {{- include "typo3.appRuntimeMounts" . | nindent 16 }}
+              resources:
+                {{- toYaml $s.resources | nindent 16 }}
+          volumes:
+            {{- include "typo3.appVolumes" . | nindent 12 }}
+{{- end }}
