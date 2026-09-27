@@ -1,15 +1,16 @@
 # Dependency updates by pinup (https://github.com/ohartwig/pinup), configured
 # in .pinup.yaml: pull requests for outdated pins plus a "Dependency
-# Dashboard" issue listing held updates.
+# Dashboard" issue listing held updates. Nothing is merged automatically.
 #
-# Token: GitHub does not start workflows for pull requests opened with the
-# workflow's own GITHUB_TOKEN. The pull requests would then never get the
-# required checks and could not be merged. Store a fine-grained personal
-# access token or a GitHub App token as the secret PINUP_TOKEN (this
-# repository only; contents, pull requests, issues and workflows read/write).
-# Without it the run falls back to GITHUB_TOKEN, which still keeps the
-# dashboard and opens pull requests, but their checks have to be started by
-# hand.
+# Identity: a GitHub App installed on this repository only, with repository
+# permissions Contents, Pull requests, Issues and Workflows (read and write).
+# Its ID and private key are stored as the secrets PINUP_APP_ID and
+# PINUP_APP_KEY; every run mints a short-lived installation token from them.
+# The app, not a person, opens the pull requests, so the maintainer can
+# review and merge them, and they trigger the CI workflow (pull requests
+# opened with the workflow's own GITHUB_TOKEN do not). Without the secrets the
+# run falls back to GITHUB_TOKEN, which can neither push changes to workflow
+# files nor start the checks.
 name: pinup
 
 on:
@@ -32,21 +33,45 @@ env:
 jobs:
   pinup:
     runs-on: ubuntu-latest
+    env:
+      HAS_APP: ${{ secrets.PINUP_APP_ID != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: App token
+        id: app
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.PINUP_APP_ID }}
+          private-key: ${{ secrets.PINUP_APP_KEY }}
+      - name: Commit identity
+        id: identity
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || secrets.GITHUB_TOKEN }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          if [ -n "$APP_SLUG" ]; then
+            user_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+            echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
+            echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=github-actions[bot]" >> "$GITHUB_OUTPUT"
+            echo "email=41898282+github-actions[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+          fi
       - name: pinup run
         env:
-          PINUP_GITHUB_TOKEN: ${{ secrets.PINUP_TOKEN || secrets.GITHUB_TOKEN }}
+          PINUP_GITHUB_TOKEN: ${{ steps.app.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_COM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PINUP_GIT_NAME: ${{ steps.identity.outputs.name }}
+          PINUP_GIT_EMAIL: ${{ steps.identity.outputs.email }}
         run: |
           # The image runs as a non-root user; run it as the runner's user so
           # it may write the plan into the checkout.
           docker run --rm -v "$PWD:/repo" -w /repo --user "$(id -u):$(id -g)" \
             -e PINUP_GITHUB_TOKEN -e GITHUB_COM_TOKEN \
-            -e PINUP_GIT_NAME="Dependency Bot" \
-            -e PINUP_GIT_EMAIL="pinup@users.noreply.github.com" \
+            -e PINUP_GIT_NAME -e PINUP_GIT_EMAIL \
             -e PINUP_SIGNING_FORMAT=none \
             "$PINUP_IMAGE" \
             pinup run --project "$GITHUB_REPOSITORY" --config .pinup.yaml --report plan.json
