@@ -17,6 +17,7 @@ permissions:
   contents: read
 
 env:
+  # pinup: datasource=github-releases depName=helm/helm
   HELM_VERSION: v4.2.4
   CHART_NAME: typo3-kubernetes-chart
   REGISTRY: ghcr.io

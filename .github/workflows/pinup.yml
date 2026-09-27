@@ -1,0 +1,56 @@
+# Dependency updates by pinup (https://github.com/ohartwig/pinup), configured
+# in .pinup.yaml: pull requests for outdated pins plus a "Dependency
+# Dashboard" issue listing held updates.
+#
+# Token: GitHub does not start workflows for pull requests opened with the
+# workflow's own GITHUB_TOKEN. The pull requests would then never get the
+# required checks and could not be merged. Store a fine-grained personal
+# access token or a GitHub App token as the secret PINUP_TOKEN (this
+# repository only; contents, pull requests, issues and workflows read/write).
+# Without it the run falls back to GITHUB_TOKEN, which still keeps the
+# dashboard and opens pull requests, but their checks have to be started by
+# hand.
+name: pinup
+
+on:
+  schedule:
+    - cron: "23 6 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pinup
+  cancel-in-progress: false
+
+env:
+  PINUP_IMAGE: ghcr.io/ohartwig/pinup:0.49.3@sha256:d05b3960897ab3eb78ee634e12fd1737acbbe292e8678420bc1b1b36cd879ba2
+
+jobs:
+  pinup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: pinup run
+        env:
+          PINUP_GITHUB_TOKEN: ${{ secrets.PINUP_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_COM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            -e PINUP_GITHUB_TOKEN -e GITHUB_COM_TOKEN \
+            -e PINUP_GIT_NAME="Dependency Bot" \
+            -e PINUP_GIT_EMAIL="pinup@users.noreply.github.com" \
+            -e PINUP_SIGNING_FORMAT=none \
+            "$PINUP_IMAGE" \
+            pinup run --project "$GITHUB_REPOSITORY" --config .pinup.yaml --report plan.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: plan
+          path: plan.json
+          if-no-files-found: ignore
