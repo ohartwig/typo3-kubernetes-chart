@@ -6,14 +6,16 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-09-27
+The first public release will be cut as 0.1.0 when the repository is
+published; until then everything below is unreleased.
 
 ### Added
 
 - TYPO3 Deployment on FrankenPHP (HTTP 8080), Service and Ingress.
 - Code delivery as an OCI artefact: `cosign verify` (optionally
   `verify-attestation`) and `oras pull` initContainers, read-only code mount.
-- Setup initContainer (`extension:setup`, `cache:warmup`).
+- Setup initContainer (`extension:setup`, `cache:warmup`), serialised across
+  pods with a database advisory lock (`app.setup.lock`).
 - TYPO3 scheduler as a CronJob with `concurrencyPolicy: Forbid`.
 - Valkey StatefulSet for cache and sessions, TLS 1.3 with client
   certificates, password auth, certificate reload sidecar.
@@ -23,3 +25,8 @@ follows [Semantic Versioning](https://semver.org/).
 - HorizontalPodAutoscaler, PodDisruptionBudget, topology spread constraints.
 - Optional database backup CronJob to a PVC or S3-compatible storage.
 - `helm test` health check, values schema, three CI value profiles.
+- GitHub Actions: CI (lint, render, kubeconform, gitleaks, REUSE) and a
+  release workflow that pushes the chart to an OCI registry and signs it
+  keylessly with cosign.
+- Threat model (`docs/threat-model.md`), code of conduct, issue and pull
+  request templates.
