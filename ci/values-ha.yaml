@@ -1,5 +1,11 @@
-# High availability: more replicas, hard spread across zones, PVC backups,
-# an issuer shared with the database operator instead of a per-release CA.
+# High availability: more replicas spread across zones and nodes, Valkey on a
+# volume, database backups off the cluster, an issuer shared with the database
+# operator instead of a per-release CA.
+#
+# Not covered: Valkey stays a single instance. The chart has no replication
+# for it, so a Valkey restart is a short cache warm-up and, without the
+# volume, logs every editor out. Run a replicated Valkey outside the chart
+# (valkey.enabled: false) if that is not acceptable.
 image:
   repository: registry.example.org/tenant-a/typo3-runtime
   tag: "8.4-frankenphp"
@@ -15,10 +21,14 @@ app:
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { memory: 1536Mi }
+  # Soft spread: with DoNotSchedule a failed zone leaves its replacement
+  # pods Pending, exactly when they are needed. The scheduler still prefers
+  # an even spread; the PodDisruptionBudget keeps drains from emptying a zone.
   topologySpread:
-    whenUnsatisfiable: DoNotSchedule
+    whenUnsatisfiable: ScheduleAnyway
     topologyKeys:
       - topology.kubernetes.io/zone
+      - kubernetes.io/hostname
 podDisruptionBudget:
   maxUnavailable: 1
 internalTls:
@@ -29,9 +39,19 @@ internalTls:
       kind: Issuer
 secrets:
   existingSecret: typo3-credentials
+valkey:
+  persistence:
+    enabled: true
+    size: 1Gi
+# Backups leave the cluster: a dump on a PVC next to the database is lost
+# with the cluster or the storage it depends on.
 backup:
   enabled: true
-  target: pvc
+  target: s3
   retentionDays: 30
-  pvc:
-    size: 20Gi
+  s3:
+    endpoint: https://s3.example.org
+    region: eu-central-1
+    bucket: typo3-backups
+    prefix: tenant-a/
+    existingSecret: typo3-backup-s3
