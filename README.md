@@ -131,6 +131,10 @@ cosign verify ghcr.io/ohartwig/charts/typo3-kubernetes-chart:0.2.0 \
 
 `ci/values-minimal.yaml`, `ci/values-full.yaml` and `ci/values-ha.yaml` show
 the smallest release, every optional feature, and a high-availability setup.
+The high-availability profile covers the TYPO3 pods, the database backups
+and the Valkey data, not Valkey itself: the chart runs Valkey as a single
+instance. Point TYPO3 at a replicated Valkey outside the chart
+(`valkey.enabled: false`) when a Valkey restart must not log editors out.
 
 ## Runtime image contract
 

@@ -6,6 +6,14 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `ci/values-ha.yaml` spreads replicas softly across zones and nodes
+  (`ScheduleAnyway`): a hard zone spread left replacement pods Pending when a
+  zone failed. It keeps Valkey on a volume and writes database backups to S3
+  instead of a PVC inside the cluster.
+- README states that Valkey stays a single instance in every profile.
+
 ## [0.2.0] - 2026-09-27
 
 ### Added
